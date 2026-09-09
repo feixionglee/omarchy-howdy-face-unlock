@@ -33,6 +33,17 @@ Item {
 
   property bool healthy: true
   property bool warnedOnce: false
+  // Retries left before a "broken" result is trusted. Right after a shell
+  // restart, `omarchy plugin list` -- which the Explorer-detection step
+  // below shells out to -- talks to the very shell process that is still
+  // starting up, and answers "omarchy-shell is not responding" for about a
+  // second. That reads as Explorer-inactive, so the check falls back to
+  // whichever file *isn't* actually live and reports broken -- a false
+  // negative on every single restart, not a real repair need. Retrying a
+  // couple of times a few seconds apart absorbs that startup window; a
+  // genuine failure still gets caught and notified, just a few seconds
+  // later instead of instantly.
+  property int retriesLeft: 2
 
   function checkHealth() {
     if (!healthCheckProc.running) healthCheckProc.running = true
@@ -57,13 +68,31 @@ Item {
       id: healthStdout
       waitForEnd: true
       onStreamFinished: {
-        root.healthy = String(text || "").trim() === "ok"
-        if (!root.healthy && !root.warnedOnce) {
+        const ok = String(text || "").trim() === "ok"
+        if (ok) {
+          root.healthy = true
+          root.retriesLeft = 2
+          return
+        }
+        if (root.retriesLeft > 0) {
+          root.retriesLeft -= 1
+          retryTimer.start()
+          return
+        }
+        root.healthy = false
+        if (!root.warnedOnce) {
           root.warnedOnce = true
           notifyProc.running = true
         }
       }
     }
+  }
+
+  Timer {
+    id: retryTimer
+    interval: 2000
+    repeat: false
+    onTriggered: root.checkHealth()
   }
 
   Process {
