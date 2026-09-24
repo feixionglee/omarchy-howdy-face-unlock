@@ -17,10 +17,6 @@ PAM_HOWDY="/etc/pam.d/omarchy-lock-howdy"
 LOCK_QML="${OMARCHY_PATH:-/usr/share/omarchy}/shell/plugins/lock/Service.qml"
 [[ -f $LOCK_QML ]] || LOCK_QML="/usr/share/omarchy/shell/plugins/lock/Service.qml"
 LOCK_QML_ORIG="$LOCK_QML.orig"
-# Expected sha256 of patch-lock-howdy.py at this commit. Root verifies the
-# staged copy against this fixed value before executing it (see the patch
-# step below) -- bump this alongside any change to that file.
-PATCHER_SHA256="d29d23ad2c29ca77b9244148aa5e60ae82e67b4e39149075a1ed60364e71e8fa"
 
 # Sets/inserts key = value inside [section] of an ini file without disturbing
 # anything else in it -- howdy's config.ini is heavily commented, and a
@@ -190,31 +186,20 @@ EOF
 if ! grep -q 'omarchy-lock-howdy' "$LOCK_QML"; then
   echo "Patching lock screen plugin for Howdy..."
   [[ -f $LOCK_QML_ORIG ]] || sudo cp -a "$LOCK_QML" "$LOCK_QML_ORIG"
-  # Root stages both the QML and the patcher into a root-owned scratch dir
-  # before touching either, so nothing it reads is a path the invoking user
-  # can still write to *by name*. That alone isn't enough, though: the sudo
-  # timestamp is already warm from the calls above, so the user-writable
-  # checkout this cp reads from could be swapped right up until the cp runs
-  # -- moving the read into a root-owned dir shrinks the window but doesn't
-  # close it, since root still executed whatever bytes were staged. Root
-  # closes it for real by checking what actually got staged, not where it
-  # came from: verify the copy's hash against the value pinned above before
-  # ever executing it, and refuse on mismatch. After that, the copy can come
-  # from anywhere -- root has independently established what it's about to run.
-  scratch_dir=$(sudo mktemp -d)
-  sudo cp "$LOCK_QML" "$scratch_dir/Service.qml"
-  sudo cp "$root/patch-lock-howdy.py" "$scratch_dir/patch-lock-howdy.py"
-  staged_sha256=$(sudo sha256sum "$scratch_dir/patch-lock-howdy.py" | awk '{print $1}')
-  if [[ $staged_sha256 != "$PATCHER_SHA256" ]]; then
-    sudo rm -rf "$scratch_dir"
-    echo -e "\e[31mpatch-lock-howdy.py hash mismatch (expected $PATCHER_SHA256, got $staged_sha256).\e[0m" >&2
-    echo -e "\e[31mRefusing to run it as root. Re-clone this plugin and try again.\e[0m" >&2
+  # Patch an unprivileged temporary copy, then use sudo only for the final
+  # install. This avoids executing plugin-provided Python as root entirely.
+  scratch_dir=$(mktemp -d)
+  cp "$LOCK_QML" "$scratch_dir/Service.qml"
+  if ! python3 "$root/patch-lock-howdy.py" "$scratch_dir/Service.qml"; then
+    rm -rf "$scratch_dir"
+    echo -e "\e[31mCould not patch the current lock Service.qml.\e[0m" >&2
+    echo -e "\e[31mIf this machine has an older/manual face-auth modification, restore the\e[0m" >&2
+    echo -e "\e[31mstock Omarchy lock file first, then rerun setup. Existing custom auth\e[0m" >&2
+    echo -e "\e[31mcode is deliberately not merged automatically.\e[0m" >&2
     exit 1
   fi
-  sudo chmod 500 "$scratch_dir/patch-lock-howdy.py"
-  sudo python3 "$scratch_dir/patch-lock-howdy.py" "$scratch_dir/Service.qml"
   sudo install -o root -g root -m 644 "$scratch_dir/Service.qml" "$LOCK_QML"
-  sudo rm -rf "$scratch_dir"
+  rm -rf "$scratch_dir"
   omarchy-restart-shell
 fi
 
