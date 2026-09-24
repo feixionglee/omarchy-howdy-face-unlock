@@ -9,7 +9,7 @@
 
 set -u
 
-PLUGIN_DIR="$HOME/.config/omarchy/plugins/io.github.tslove923.howdy-face-unlock"
+PLUGIN_DIR="$HOME/.config/omarchy/plugins/io.github.feixionglee.howdy-face-unlock"
 [[ -f $PLUGIN_DIR/manifest.json ]] || exit 0  # plugin removed; nothing to repair
 
 # ------------------------------------------------------------ stock lock --
