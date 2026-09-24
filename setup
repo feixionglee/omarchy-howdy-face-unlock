@@ -99,16 +99,23 @@ omarchy-pkg-aur-add howdy-git
 if command -v linux-enable-ir-emitter >/dev/null 2>&1; then
   echo "Found linux-enable-ir-emitter at $(command -v linux-enable-ir-emitter)"
 else
-  emitter_version="7.0.0-beta2"
-  emitter_tag="7.0.0-beta"
-  emitter_archive="linux-enable-ir-emitter-${emitter_version}-release-x86-64.tar.gz"
-  emitter_url="https://github.com/EmixamPP/linux-enable-ir-emitter/releases/download/${emitter_tag}/${emitter_archive}"
+  emitter_api="https://api.github.com/repos/EmixamPP/linux-enable-ir-emitter/releases"
   emitter_tmp=$(mktemp -d)
+  trap 'rm -rf "$emitter_tmp"' EXIT
 
-  echo "Installing linux-enable-ir-emitter ${emitter_version} from upstream release..."
+  # Resolve the newest published x86-64 prebuilt asset dynamically. This also
+  # handles upstream releases whose tag and asset version differ.
+  emitter_url=$(
+    curl -fsSL "$emitter_api" |
+      python -c 'import json,sys; releases=json.load(sys.stdin); print(next(a["browser_download_url"] for r in releases if not r.get("draft") for a in r.get("assets", []) if a["name"].startswith("linux-enable-ir-emitter-") and a["name"].endswith("-release-x86-64.tar.gz")))'
+  )
+  emitter_archive=${emitter_url##*/}
+
+  echo "Installing latest linux-enable-ir-emitter upstream prebuilt: $emitter_archive"
   curl -fL "$emitter_url" -o "$emitter_tmp/$emitter_archive"
   sudo tar -C /usr/local/bin --no-same-owner -m -xzf "$emitter_tmp/$emitter_archive"
   rm -rf "$emitter_tmp"
+  trap - EXIT
 fi
 
 echo -e "\nConfiguring Howdy...\n"
