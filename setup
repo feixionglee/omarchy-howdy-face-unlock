@@ -89,7 +89,26 @@ if omarchy-pkg-missing python-dlib; then
   fi
 fi
 
-omarchy-pkg-aur-add howdy-git linux-enable-ir-emitter
+omarchy-pkg-aur-add howdy-git
+
+# Arch currently ships OpenCV 5, while the AUR linux-enable-ir-emitter 6.x
+# package still builds against opencv4 and fails on a current system. Prefer
+# an already-installed emitter binary; otherwise install the upstream 7.x
+# prebuilt release, which does not depend on the local OpenCV development
+# package.
+if command -v linux-enable-ir-emitter >/dev/null 2>&1; then
+  echo "Found linux-enable-ir-emitter at $(command -v linux-enable-ir-emitter)"
+else
+  emitter_version="7.0.0-beta2"
+  emitter_archive="linux-enable-ir-emitter-${emitter_version}-release-x86-64.tar.gz"
+  emitter_url="https://github.com/EmixamPP/linux-enable-ir-emitter/releases/download/${emitter_version}/${emitter_archive}"
+  emitter_tmp=$(mktemp -d)
+
+  echo "Installing linux-enable-ir-emitter ${emitter_version} from upstream release..."
+  curl -fL "$emitter_url" -o "$emitter_tmp/$emitter_archive"
+  sudo tar -C /usr/local/bin --no-same-owner -m -xzf "$emitter_tmp/$emitter_archive"
+  rm -rf "$emitter_tmp"
+fi
 
 echo -e "\nConfiguring Howdy...\n"
 sudo mkdir -p "$MODELS_DIR"
@@ -124,7 +143,11 @@ if [[ ! -d /etc/linux-enable-ir-emitter ]] || [[ -z $(sudo find /etc/linux-enabl
   # setup -- the real test of whether the emitter fires is enrollment below
   # and the lock screen itself, not this tool's exit code.
   set +e
-  sudo linux-enable-ir-emitter --device "$ir_device" --verbose configure --no-gui --limit -1
+  # linux-enable-ir-emitter 7.x changed its CLI and no longer accepts the
+  # old global --device flag used by 6.x. Let the tool use its own device
+  # discovery/configuration flow; if the emitter is already working it may
+  # still exit non-zero, which is intentionally treated as informational.
+  sudo linux-enable-ir-emitter configure
   emitter_status=$?
   set -e
 
