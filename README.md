@@ -6,8 +6,8 @@ Mirrors the fingerprint flow as closely as Omarchy's plugin system allows.
 ## Install
 
 ```
-omarchy plugin add https://github.com/tslove923/omarchy-howdy-face-unlock
-~/.config/omarchy/plugins/io.github.tslove923.howdy-face-unlock/setup
+omarchy plugin add https://github.com/feixionglee/omarchy-howdy-face-unlock
+~/.config/omarchy/plugins/io.github.feixionglee.howdy-face-unlock/setup
 ```
 
 `omarchy plugin add` only clones files — run `setup` yourself afterward. It
@@ -25,8 +25,8 @@ once an IR camera is detected / Howdy is installed, respectively).
 ## Remove
 
 ```
-~/.config/omarchy/plugins/io.github.tslove923.howdy-face-unlock/remove
-omarchy plugin remove io.github.tslove923.howdy-face-unlock
+~/.config/omarchy/plugins/io.github.feixionglee.howdy-face-unlock/remove
+omarchy plugin remove io.github.feixionglee.howdy-face-unlock
 ```
 
 ## Why this is a plugin and not just a script
