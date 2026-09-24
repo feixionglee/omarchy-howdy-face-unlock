@@ -58,4 +58,4 @@ echo "(Your enrolled face model at /etc/howdy/models and /etc/howdy/config.ini"
 echo "were left in place in case you reinstall Howdy later.)"
 echo
 echo "You'll probably also want to remove the plugin itself:"
-echo "  omarchy plugin remove io.github.tslove923.howdy-face-unlock"
+echo "  omarchy plugin remove io.github.feixionglee.howdy-face-unlock"
