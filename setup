@@ -100,8 +100,9 @@ if command -v linux-enable-ir-emitter >/dev/null 2>&1; then
   echo "Found linux-enable-ir-emitter at $(command -v linux-enable-ir-emitter)"
 else
   emitter_version="7.0.0-beta2"
+  emitter_tag="7.0.0-beta"
   emitter_archive="linux-enable-ir-emitter-${emitter_version}-release-x86-64.tar.gz"
-  emitter_url="https://github.com/EmixamPP/linux-enable-ir-emitter/releases/download/${emitter_version}/${emitter_archive}"
+  emitter_url="https://github.com/EmixamPP/linux-enable-ir-emitter/releases/download/${emitter_tag}/${emitter_archive}"
   emitter_tmp=$(mktemp -d)
 
   echo "Installing linux-enable-ir-emitter ${emitter_version} from upstream release..."
