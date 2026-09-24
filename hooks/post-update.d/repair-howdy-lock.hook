@@ -21,11 +21,6 @@ LOCK_QML="${OMARCHY_PATH:-/usr/share/omarchy}/shell/plugins/lock/Service.qml"
 [[ -f $LOCK_QML ]] || LOCK_QML="/usr/share/omarchy/shell/plugins/lock/Service.qml"
 
 PATCHER="$PLUGIN_DIR/patch-lock-howdy.py"
-# Expected sha256 of patch-lock-howdy.py -- must match the constant in setup.
-# Root verifies the staged copy against this before executing it, so the
-# sudo session warm from omarchy-update's own pacman prompt can't be made to
-# run whatever happens to be sitting in this user-writable plugin checkout.
-PATCHER_SHA256="d29d23ad2c29ca77b9244148aa5e60ae82e67b4e39149075a1ed60364e71e8fa"
 
 if [[ -f $LOCK_QML ]] && ! grep -q 'omarchy-lock-howdy' "$LOCK_QML"; then
   echo "Howdy Face Unlock: re-patching lock screen after update..."
@@ -38,35 +33,22 @@ if [[ -f $LOCK_QML ]] && ! grep -q 'omarchy-lock-howdy' "$LOCK_QML"; then
   if ! sudo -n true 2>/dev/null; then
     echo "Howdy Face Unlock: sudo not available non-interactively; skipping repair (will notify instead)."
   else
-    # Same root-owned-scratch-dir-plus-hash-check pattern as setup: staging
-    # through root alone only shrinks the window where a user-writable checkout
-    # could be swapped before its bytes run as root, since the sudo timestamp is
-    # already warm here from omarchy-update's own pacman prompt. Verifying the
-    # staged copy's hash before executing it closes that window instead of just
-    # narrowing it -- root checks what it's about to run, not just where it
-    # staged it from.
-    scratch_dir=$(sudo -n mktemp -d) || exit 0
-    sudo -n cp "$LOCK_QML" "$scratch_dir/Service.qml" &&
-    sudo -n cp "$PATCHER" "$scratch_dir/patch-lock-howdy.py"
-    if [[ $(sudo -n sha256sum "$scratch_dir/patch-lock-howdy.py" 2>/dev/null | awk '{print $1}') != "$PATCHER_SHA256" ]]; then
-      sudo -n rm -rf "$scratch_dir"
-      echo "Howdy Face Unlock: patch-lock-howdy.py hash mismatch; skipping repair (will notify instead)." >&2
-    else
-      sudo -n chmod 500 "$scratch_dir/patch-lock-howdy.py" &&
-      sudo -n python3 "$scratch_dir/patch-lock-howdy.py" "$scratch_dir/Service.qml" &&
+    # Patch a user-owned temporary copy; sudo is used only to install the
+    # resulting data file. No plugin-provided Python is ever executed as root.
+    scratch_dir=$(mktemp -d) || exit 0
+    cp "$LOCK_QML" "$scratch_dir/Service.qml" || { rm -rf "$scratch_dir"; exit 0; }
+    if python3 "$PATCHER" "$scratch_dir/Service.qml"; then
       sudo -n install -o root -g root -m 644 "$scratch_dir/Service.qml" "$LOCK_QML"
       patch_status=$?
-      sudo -n rm -rf "$scratch_dir"
+    else
+      patch_status=$?
+    fi
+    rm -rf "$scratch_dir"
 
-      if (( patch_status != 0 )); then
-        echo "Howdy Face Unlock: automatic repair failed; rerun $PLUGIN_DIR/setup" >&2
-      else
-        echo "Howdy Face Unlock: lock screen re-patched."
-        # The shell will pick this up on its own next restart/health-check
-        # poll; omarchy-update's own end-of-run restart (or
-        # omarchy-restart-shell) covers the common case, so don't force a
-        # restart mid-update here.
-      fi
+    if (( patch_status != 0 )); then
+      echo "Howdy Face Unlock: automatic repair failed; rerun $PLUGIN_DIR/setup" >&2
+    else
+      echo "Howdy Face Unlock: lock screen re-patched."
     fi
   fi
 fi
