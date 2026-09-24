@@ -279,7 +279,7 @@ else
 fi
 
 echo -e "\e[32m\nDone! Howdy will now try face unlock alongside your password"
-echo -e "(and fingerprint, if set up) whenever the lock screen engages.\e[0m"
+echo -e "(and fingerprint, if set up) when you return to and wake the locked screen.\e[0m"
 echo
 echo "Note: the lock screen change above patches a file the omarchy package"
 echo "owns (lock/Service.qml), so an 'omarchy update' can silently revert it."
