@@ -13,6 +13,112 @@ source "$root/modules/lock-screen.sh"
 source "$root/modules/sudo.sh"
 source "$root/modules/polkit.sh"
 
+# Module selection. Interactive setup defaults to all three modules; pressing
+# Enter accepts the defaults. Automation can use --all or --modules.
+SELECTED_MODULES=()
+
+usage() {
+  cat <<'EOF'
+Usage: ./setup [--all | --modules lock-screen,sudo,polkit]
+
+Without options, setup interactively lets you toggle the three authentication
+modules. All three are selected by default.
+EOF
+}
+
+normalize_modules() {
+  local raw=$1 item
+  IFS=',' read -ra SELECTED_MODULES <<< "$raw"
+  for item in "${SELECTED_MODULES[@]}"; do
+    case "$item" in
+      lock-screen|sudo|polkit) ;;
+      *) echo "Unknown module: $item" >&2; usage; exit 2 ;;
+    esac
+  done
+}
+
+select_modules_interactively() {
+  local modules=("lock-screen" "sudo" "polkit")
+  local labels=(
+    "Lock screen — Omarchy face unlock"
+    "sudo — face authentication for sudo commands"
+    "Polkit — desktop/system authentication (for example 1Password)"
+  )
+  local enabled=(1 1 1)
+  local i answer
+
+  # Keep this dependency-free and SSH/TTY friendly. Empty input accepts all
+  # defaults; users can enter comma-separated numbers to toggle them off/on.
+  echo
+  echo "Configure Howdy authentication integrations:"
+  for i in "${!modules[@]}"; do
+    printf "  [%s] %d) %s\n" "$( (( enabled[i] )) && echo x || echo ' ' )" "$((i + 1))" "${labels[i]}"
+  done
+  echo
+  read -r -p "Press Enter for all, or enter numbers to toggle (e.g. 2 or 2,3): " answer
+
+  if [[ -n $answer ]]; then
+    IFS=',' read -ra choices <<< "$answer"
+    for answer in "${choices[@]}"; do
+      answer=${answer//[[:space:]]/}
+      case "$answer" in
+        1|2|3)
+          i=$((answer - 1))
+          enabled[i]=$((1 - enabled[i]))
+          ;;
+        *) echo "Invalid selection: $answer" >&2; exit 2 ;;
+      esac
+    done
+  fi
+
+  SELECTED_MODULES=()
+  for i in "${!modules[@]}"; do
+    (( enabled[i] )) && SELECTED_MODULES+=("${modules[i]}")
+  done
+  if (( ${#SELECTED_MODULES[@]} == 0 )); then
+    echo "No authentication modules selected; nothing to configure." >&2
+    exit 2
+  fi
+}
+
+case "${1:-}" in
+  --all)
+    SELECTED_MODULES=("lock-screen" "sudo" "polkit")
+    shift
+    ;;
+  --modules)
+    [[ -n ${2:-} ]] || { echo "--modules requires a comma-separated list." >&2; usage; exit 2; }
+    normalize_modules "$2"
+    shift 2
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    if [[ -t 0 ]]; then
+      select_modules_interactively
+    else
+      # Preserve one-click behavior for non-interactive plugin automation.
+      SELECTED_MODULES=("lock-screen" "sudo" "polkit")
+    fi
+    ;;
+  *)
+    echo "Unknown option: $1" >&2
+    usage
+    exit 2
+    ;;
+esac
+(( $# == 0 )) || { echo "Unexpected argument: $1" >&2; usage; exit 2; }
+
+module_selected() {
+  local wanted=$1 item
+  for item in "${SELECTED_MODULES[@]}"; do
+    [[ $item == "$wanted" ]] && return 0
+  done
+  return 1
+}
+
 CONFIG_DIR="/etc/howdy"
 MODELS_DIR="$CONFIG_DIR/models"
 CONFIG_FILE="$CONFIG_DIR/config.ini"
@@ -176,15 +282,16 @@ if [[ ! -f "$MODELS_DIR/$USER.dat" ]]; then
   sudo howdy add
 fi
 
-# One-click default: enable all authentication integrations.
-setup_lock_screen_module
-setup_sudo_module
-setup_polkit_module
+echo -e "\nConfiguring selected authentication modules..."
+module_selected lock-screen && setup_lock_screen_module
+module_selected sudo && setup_sudo_module
+module_selected polkit && setup_polkit_module
 
-echo -e "\e[32m\nDone! Howdy authentication is enabled for all three default modules:\e[0m"
-echo "  - Omarchy lock screen"
-echo "  - sudo"
-echo "  - Polkit / desktop system authentication"
+echo -e "\e[32m\nDone! Enabled Howdy authentication modules:\e[0m"
+module_selected lock-screen && echo "  - Omarchy lock screen"
+module_selected sudo && echo "  - sudo"
+module_selected polkit && echo "  - Polkit / desktop system authentication"
+if module_selected lock-screen; then
 echo
 echo "Note: the lock screen change above patches a file the omarchy package"
 echo "owns (lock/Service.qml), so an 'omarchy update' can silently revert it."
@@ -199,4 +306,5 @@ if [[ -f $EXPLORER_QML ]] && grep -q 'omarchy-lock-howdy' "$EXPLORER_QML"; then
   echo "reverting it (Omarchy has no post-plugin-update hook point today) --"
   echo "this plugin's watchdog will still notice and tell you to rerun this"
   echo "script if that happens."
+fi
 fi
