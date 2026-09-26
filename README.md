@@ -24,7 +24,10 @@ authentication modules in one pass:
   privileged desktop actions that authenticate through Polkit/PAM (including
   1Password's Linux system-authentication flow).
 
-All three modules are enabled by default; there is still only one setup command.
+All three modules are selected by default. Interactive setup shows the choices
+before making PAM changes; press Enter to accept all three, or toggle the
+modules you do not want. For automation, use `./setup --all` or select an
+explicit subset such as `./setup --modules lock-screen,polkit`.
 
 Setup and removal are also reachable from the Omarchy menu: **Setup → Security
 → Face Unlock** and **Remove → Security → Face Unlock** (both only appear
@@ -106,7 +109,8 @@ trusts, so the same ceremony there wouldn't buy anything real.
 
 ## Authentication modules
 
-The installer is intentionally one-click, but the integrations are separate in
+The installer remains one-click by default, but interactive runs let the user
+choose the integrations before they are configured. The integrations are separate in
 `modules/`: `lock-screen.sh`, `sudo.sh`, and `polkit.sh`. This keeps each
 authentication surface independently installable/removable in code without
 turning `system-auth` into a global Howdy switch.
