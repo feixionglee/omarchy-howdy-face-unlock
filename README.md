@@ -15,8 +15,19 @@ detects your IR camera, installs `howdy-git` and `linux-enable-ir-emitter`
 from the AUR (building `python-dlib` CPU-only unless it detects an Nvidia
 GPU, to dodge that AUR package's broken CUDA subpackage; the CPU-only build
 clones the AUR PKGBUILD pinned to a fixed commit SHA so upstream can't move
-under the build), configures the emitter, enrolls your face, and wires up
-the lock screen.
+under the build), configures the emitter, enrolls your face, and enables three independent
+authentication modules in one pass:
+
+- **Omarchy lock screen** — face unlock alongside password/fingerprint.
+- **sudo** — tries Howdy first, then falls back to the existing PAM stack.
+- **Polkit / desktop authentication** — enables Howdy for applications and
+  privileged desktop actions that authenticate through Polkit/PAM (including
+  1Password's Linux system-authentication flow).
+
+All three modules are selected by default. Interactive setup shows the choices
+before making PAM changes; press Enter to accept all three, or toggle the
+modules you do not want. For automation, use `./setup --all` or select an
+explicit subset such as `./setup --modules lock-screen,polkit`.
 
 Setup and removal are also reachable from the Omarchy menu: **Setup → Security
 → Face Unlock** and **Remove → Security → Face Unlock** (both only appear
@@ -95,6 +106,21 @@ a warm `sudo` timestamp being used to run tampered bytes as root; with no
 privilege escalation involved, anyone able to tamper with that patcher
 could equally tamper with anything else the user's own shell already
 trusts, so the same ceremony there wouldn't buy anything real.
+
+## Authentication modules
+
+The installer remains one-click by default, but interactive runs let the user
+choose the integrations before they are configured. The integrations are separate in
+`modules/`: `lock-screen.sh`, `sudo.sh`, and `polkit.sh`. This keeps each
+authentication surface independently installable/removable in code without
+turning `system-auth` into a global Howdy switch.
+
+The Polkit module never edits Arch's package-owned
+`/usr/lib/pam.d/polkit-1`. It creates an administrator override at
+`/etc/pam.d/polkit-1`, inserts `pam_howdy.so` before the existing
+`system-auth` include, and removes/restores only configuration the plugin
+owns. The sudo module follows the same ownership rule and preserves a pristine
+backup before changing `/etc/pam.d/sudo`.
 
 ## What setup actually changes
 
