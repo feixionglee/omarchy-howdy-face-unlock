@@ -4,6 +4,11 @@
 
 set -e
 
+root=$(cd "$(dirname "$0")" && pwd)
+source "$root/modules/lock-screen.sh"
+source "$root/modules/sudo.sh"
+source "$root/modules/polkit.sh"
+
 PAM_HOWDY="/etc/pam.d/omarchy-lock-howdy"
 # Match setup's path resolution: patch/restore whichever copy the running
 # shell actually reads (dev checkout vs. packaged install).
@@ -16,6 +21,7 @@ POST_UPDATE_HOOK="$HOME/.config/omarchy/hooks/post-update.d/repair-howdy-lock.ho
 
 echo -e "\e[32mRemoving face unlock (Howdy) from the lock screen.\n\e[0m"
 
+remove_lock_screen_integration() {
 if [[ -f $PAM_HOWDY ]]; then
   echo "Removing lock screen Howdy authentication..."
   sudo rm -f "$PAM_HOWDY"
@@ -49,6 +55,14 @@ elif grep -q 'omarchy-lock-howdy' "$EXPLORER_QML" 2>/dev/null; then
   echo -e "\e[31mNo pristine backup found for Lock Screen Explorer's Service.qml but it"
   echo -e "still looks patched -- leaving it alone rather than guessing at a revert.\e[0m"
 fi
+
+
+}
+
+# Remove only configuration this plugin owns; each integration is independent.
+remove_lock_screen_module
+remove_sudo_module
+remove_polkit_module
 
 echo "Removing Howdy packages..."
 omarchy-pkg-drop howdy-git linux-enable-ir-emitter python-dlib
