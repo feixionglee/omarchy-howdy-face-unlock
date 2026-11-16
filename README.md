@@ -40,72 +40,69 @@ once an IR camera is detected / Howdy is installed, respectively).
 omarchy plugin remove io.github.feixionglee.howdy-face-unlock
 ```
 
-## Why this is a plugin and not just a script
+## Independent locks and legacy integration
 
-It isn't, entirely. Omarchy's lock screen (`omarchy.lock`) is a single
-first-party `service`-kind plugin with no hook for a third party to add a new
-PAM auth backend to it — plugins mount independently, they don't extend each
-other. So `setup` still has to hand-patch
-`/usr/share/omarchy/shell/plugins/lock/Service.qml` directly, the same as it
-would if this were a loose script. That file is package-owned, so an
-`omarchy update` can silently revert the patch.
+The active lock determines how this plugin integrates with the shell. Setup
+queries `omarchy plugin list --json`; run it while the shell is available and
+exactly one lock plugin is enabled.
 
-What the plugin *does* buy: `setup` installs a `post-update` hook
-(`omarchy hook install post-update ...`) that runs during `omarchy update`,
-right after system packages and migrations — i.e. right after the patch may
-have just been overwritten. It re-patches the file there, silently, while
-`omarchy update`'s own sudo session is still authenticated, so face unlock
-survives an update on its own; you don't need to notice anything or rerun
-`setup` yourself in the common case.
+- **An independent lock clone** (`clonedFrom: omarchy.lock`, any plugin ID):
+  setup creates the dedicated `/etc/pam.d/omarchy-lock-howdy` service but does
+  not modify the clone, the packaged default lock, or dormant Explorer files.
+  The clone must already implement Howdy authentication. This plugin does not
+  inject authentication code into arbitrary third-party QML.
+- **The stock lock or supported Lock Screen Explorer**: the existing QML
+  patch integration and update repair remain available for compatibility.
+- **Unknown or ambiguous active lock**: the lock-screen setup step stops before
+  modifying PAM or lock files. The post-update hook skips repairs and explains
+  that the lock could not be identified. Other earlier setup steps may already
+  have completed; this is not a rollback of the whole installer.
 
-That repair can only fail if sudo isn't authenticated non-interactively at
-that point (e.g. an unusual update flow). For that case, this repo's
-`Service.qml` also runs as a real first-class Omarchy service and checks on
-every shell start whether the patch survived. If it's still missing, you get
-a critical desktop notification telling you to rerun `setup`, instead of face
-unlock just silently going dead until you notice at the worst possible moment
-(i.e., at the lock screen).
+The post-update hook inspects the active integration before doing anything.
+For independent clones it only reports health, without invoking sudo or
+writing system files. Existing legacy installations keep their repair path.
+Installing an updated plugin checkout alone does not replace the previously
+copied hook; install the new hook explicitly:
 
-On a dev checkout (`OMARCHY_PATH` pointing at a source tree), the running
-shell loads the lock plugin from `$OMARCHY_PATH/shell/plugins/lock/Service.qml`
-rather than `/usr/share/omarchy/...`, so `setup` and this health check resolve
-that path too. A `git pull` that reverts it is the dev equivalent of an
-`omarchy update` overwriting the packaged copy.
+```sh
+omarchy hook install post-update ~/.config/omarchy/plugins/io.github.feixionglee.howdy-face-unlock/hooks/post-update.d/repair-howdy-lock.hook
+omarchy-shell shell rescanPlugins
+```
 
-Query its health directly: `omarchy-shell howdy status` → `ok` or `broken`.
+### Health checks
 
-### How the patch step stays safe to run as root
+`omarchy-shell howdy status` returns `ok`, `broken`, or `unknown`.
+`omarchy-shell howdy check` requests a new check (the result is asynchronous).
 
-Both `setup` and the post-update hook patch `lock/Service.qml` by staging a
-copy into a root-owned scratch dir (`sudo mktemp -d`, mode `700`) and running
-`patch-lock-howdy.py` from there instead of straight out of this checkout.
-Staging alone isn't enough, though: by the time that patch step runs, `sudo`
-is already authenticated from earlier in the same script (or, for the hook,
-from `omarchy update`'s own pacman prompt) — so anything running as the
-invoking user could still swap `patch-lock-howdy.py` in this user-writable
-checkout right up until root's `cp` reads it, and root would stage and
-execute those swapped bytes instead. Moving the read into a root-owned
-directory shrinks that window; it doesn't close it.
+The check first reads `omarchy-shell lock status`. Locks can expose boolean
+`howdy` and `passwordPam` fields: both true means ready, and either false
+means broken. These fields report dependency readiness, not a successful
+camera recognition attempt. No authentication is started by the check.
 
-What closes it: both call sites pin `patch-lock-howdy.py`'s sha256 as a
-constant and have root verify the staged copy against it before ever
-executing it, refusing on mismatch. That checks *what* is about to run
-rather than *where* it was staged from, so a swapped file is caught
-regardless of timing. Bump the pinned hash in both `setup` and
-`hooks/post-update.d/repair-howdy-lock.hook` if you ever modify
-`patch-lock-howdy.py`.
+If this status API is unavailable or unsupported, only the known stock and
+Explorer integrations fall back to checking their active QML file and the
+dedicated PAM service. An arbitrary clone without the status fields is
+**unknown**, not broken; no repair notification is issued merely because its
+API differs. A patched but inactive default lock cannot make a custom lock
+appear healthy. Startup checks retry briefly while the shell loads.
 
-`patch-lock-howdy-explorer.py` (Lock Screen Explorer's own `Service.qml`,
-see below) skips all of this and runs directly as the invoking user, with
-no scratch dir, no hash pin, no `sudo`. That's deliberate, not an
-oversight: its target file lives in the user's own plugin checkout, not a
-package-owned path — the invoking user already owns it outright, so
-patching it doesn't cross a privilege boundary the way writing to
-`/usr/share/omarchy` does. The scratch-dir-plus-hash dance defends against
-a warm `sudo` timestamp being used to run tampered bytes as root; with no
-privilege escalation involved, anyone able to tamper with that patcher
-could equally tamper with anything else the user's own shell already
-trusts, so the same ceremony there wouldn't buy anything real.
+The helper can also be run directly for diagnostics:
+
+```sh
+python3 bin/howdy-lock-state.py integration  # custom, legacy, or unknown
+python3 bin/howdy-lock-state.py health       # ok, broken, or unknown
+```
+
+These checks use only the standard library and make read-only IPC calls.
+An absent shell, malformed response, or timeout never authorizes patching an
+unknown lock.
+
+### Legacy patch installation
+
+The legacy installer and update hook patch an unprivileged temporary copy of
+QML and use sudo only to install the resulting file. They do not run the
+Python patcher as root. Explorer files are user-owned and are patched without
+sudo. These paths are skipped entirely for independent lock clones.
 
 ## Authentication modules
 
@@ -225,3 +222,14 @@ A few things worth knowing about this support:
   IPC `status()` fields. It has not been verified against the live,
   enabled lock screen. If something doesn't work in practice, please open
   an issue.
+
+## Tests
+
+```sh
+python3 -m unittest discover -s tests
+qmllint Service.qml
+bash -n modules/lock-screen.sh hooks/post-update.d/repair-howdy-lock.hook
+```
+
+Tests use temporary files and mocked IPC/privilege commands. They do not modify
+the desktop, open the camera, or require sudo.

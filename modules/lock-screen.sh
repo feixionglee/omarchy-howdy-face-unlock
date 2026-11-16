@@ -6,12 +6,29 @@
 # module entry points; the implementation is kept out of the orchestrators.
 
 configure_lock_screen_integration() {
+  local lock_mode
+  lock_mode=$(python3 "$root/bin/howdy-lock-state.py" integration) || return 1
+  case "$lock_mode" in
+    custom|legacy) ;;
+    *)
+      echo "Cannot identify the active lock screen. Start the Omarchy shell and enable one lock plugin, then rerun setup. Lock files were not modified." >&2
+      return 1 ;;
+  esac
   echo -e "\nConfiguring lock screen for Howdy authentication...\n"
 sudo tee "$PAM_HOWDY" >/dev/null <<'EOF'
 #%PAM-1.0
 auth       required                    pam_howdy.so
 account    include                     system-local-login
 EOF
+
+if [[ $lock_mode == custom ]]; then
+  # A user-owned clone supplies its own authentication code. Do not patch
+  # dormant system or Explorer files, or guess how to modify arbitrary QML.
+  omarchy hook install post-update "$root/hooks/post-update.d/repair-howdy-lock.hook"
+  echo "Custom lock detected: dedicated PAM service configured; lock files were not modified."
+  echo "The custom lock must implement Howdy authentication; check: omarchy-shell howdy status"
+  return 0
+fi
 
 # Patch the lock plugin to run Howdy as its own path, parallel to (and
 # independent of) fingerprint's. `omarchy update` overwrites this file since
