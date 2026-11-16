@@ -12,6 +12,21 @@ set -u
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/io.github.feixionglee.howdy-face-unlock"
 [[ -f $PLUGIN_DIR/manifest.json ]] || exit 0  # plugin removed; nothing to repair
 
+# Only the stock lock and supported Explorer integration use legacy patches.
+# Never change dormant system files for an independent clone, or when the
+# shell cannot tell us which lock is active.
+lock_mode=$(python3 "$PLUGIN_DIR/bin/howdy-lock-state.py" integration) || lock_mode=unknown
+case "$lock_mode" in
+  custom)
+    health=$(python3 "$PLUGIN_DIR/bin/howdy-lock-state.py" health) || health=unknown
+    echo "Howdy Face Unlock: custom lock health=$health; lock files were not modified."
+    exit 0 ;;
+  legacy) ;;
+  *)
+    echo "Howdy Face Unlock: active lock is unknown; lock files were not modified. Retry after the shell is ready." >&2
+    exit 0 ;;
+esac
+
 # ------------------------------------------------------------ stock lock --
 
 # The shell loads its plugins from $OMARCHY_PATH/shell on a dev checkout but

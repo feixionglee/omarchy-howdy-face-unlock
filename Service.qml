@@ -2,47 +2,19 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// This plugin's only real shell-side job: notice if the lock screen's
-// Howdy patch got reverted and tell the user, rather than let face unlock
-// silently go dead until they notice at the worst possible moment.
-//
-// Two different files can carry that patch, and only one is ever actually
-// loaded for the `lock` IPC target at a time (see README's "Lock-screen
-// replacement plugins" section and issue #1):
-//   - the stock lock/Service.qml, package-owned -- an `omarchy update`
-//     overwrites it, which this plugin's `setup` and its post-update hook
-//     both repair.
-//   - Lock Screen Explorer's own Service.qml, when that `clonedFrom:
-//     omarchy.lock` replacement plugin is installed and enabled -- its
-//     own updates (`omarchy plugin update`, not `omarchy update`) can
-//     revert it, and Omarchy has no post-plugin-update hook to repair
-//     that automatically the way the stock file's hook does.
-// Check whichever one is actually active, so this watchdog reflects
-// reality instead of reporting the dormant file as healthy while the
-// live one silently has no Howdy patch at all.
+// Prefer the active lock's runtime status. A read-only helper preserves
+// compatibility with supported legacy patches and reports unknown for
+// custom locks that do not expose authentication readiness.
 Item {
   id: root
 
   property var shell: null
 
-  // Packaged default; on a dev checkout the running shell reads the lock
-  // plugin from $OMARCHY_PATH/shell instead, so the check below resolves it.
-  readonly property string lockQml: "/usr/share/omarchy/shell/plugins/lock/Service.qml"
-  readonly property string explorerQml: Quickshell.env("HOME") + "/.config/omarchy/plugins/io.github.sirjul1337.lock-explorer/Service.qml"
-  readonly property string pamFile: "/etc/pam.d/omarchy-lock-howdy"
-
-  property bool healthy: true
+  readonly property string probePath: decodeURIComponent(
+    Qt.resolvedUrl("bin/howdy-lock-state.py").toString().replace(/^file:\/\//, ""))
+  property string health: "unknown"
   property bool warnedOnce: false
-  // Retries left before a "broken" result is trusted. Right after a shell
-  // restart, `omarchy plugin list` -- which the Explorer-detection step
-  // below shells out to -- talks to the very shell process that is still
-  // starting up, and answers "omarchy-shell is not responding" for about a
-  // second. That reads as Explorer-inactive, so the check falls back to
-  // whichever file *isn't* actually live and reports broken -- a false
-  // negative on every single restart, not a real repair need. Retrying a
-  // couple of times a few seconds apart absorbs that startup window; a
-  // genuine failure still gets caught and notified, just a few seconds
-  // later instead of instantly.
+  // IPC and authentication dependency checks may not be ready at startup.
   property int retriesLeft: 2
 
   function checkHealth() {
@@ -51,27 +23,16 @@ Item {
 
   Process {
     id: healthCheckProc
-    command: ["bash", "-c", [
-      "qml=${OMARCHY_PATH:-/usr/share/omarchy}/shell/plugins/lock/Service.qml",
-      "[[ -f $qml ]] || qml=" + root.lockQml,
-      // Lock Screen Explorer replaces the stock lock plugin only while it
-      // is actually enabled -- `omarchy plugin list --json` is the source
-      // of truth for that, not just whether it's installed on disk.
-      "explorer_qml=" + root.explorerQml,
-      "if [[ -f $explorer_qml ]] && command -v omarchy >/dev/null 2>&1; then " +
-        "active=$(omarchy plugin list --json 2>/dev/null | grep -o '\"id\":\"io.github.sirjul1337.lock-explorer\"[^}]*\"enabled\":true'); " +
-        "[[ -n $active ]] && qml=$explorer_qml; " +
-      "fi",
-      "[[ -f " + root.pamFile + " ]] && grep -q omarchy-lock-howdy \"$qml\" && echo ok || echo broken"
-    ].join("; ")]
+    command: ["python3", root.probePath, "health"]
     stdout: StdioCollector {
       id: healthStdout
       waitForEnd: true
       onStreamFinished: {
-        const ok = String(text || "").trim() === "ok"
-        if (ok) {
-          root.healthy = true
+        const result = String(text || "").trim()
+        if (result === "ok") {
+          root.health = "ok"
           root.retriesLeft = 2
+          root.warnedOnce = false
           return
         }
         if (root.retriesLeft > 0) {
@@ -79,8 +40,9 @@ Item {
           retryTimer.start()
           return
         }
-        root.healthy = false
-        if (!root.warnedOnce) {
+        root.health = result === "broken" ? "broken" : "unknown"
+        // An unsupported status API is not evidence of broken authentication.
+        if (root.health === "broken" && !root.warnedOnce) {
           root.warnedOnce = true
           notifyProc.running = true
         }
@@ -100,7 +62,7 @@ Item {
     command: [
       "omarchy-notification-send", "-u", "critical", "-g", "󰄀",
       "Face Unlock Needs Repair",
-      "An Omarchy (or plugin) update likely reverted the lock screen patch Howdy Face Unlock depends on. Re-run this plugin's setup script to fix it."
+      "The active lock screen reports missing authentication readiness or a missing legacy Howdy integration. Check the active lock and its PAM configuration."
     ]
   }
 
@@ -108,10 +70,11 @@ Item {
     target: "howdy"
 
     function status(): string {
-      return root.healthy ? "ok" : "broken"
+      return root.health
     }
 
     function check(): string {
+      root.retriesLeft = 2
       root.checkHealth()
       return "checking"
     }
